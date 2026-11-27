@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>My Video Player</title>
+
+<!-- HLS.js for M3U8 playback -->
+<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+
+<style>
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background: #101116;
+    color: white;
+    font-family: Arial, sans-serif;
+    min-height: 100vh;
+}
+
+header {
+    background: #191b23;
+    padding: 20px;
+    text-align: center;
+    border-bottom: 1px solid #30323c;
+}
+
+header h1 {
+    color: #00d5ff;
+    font-size: 25px;
+}
+
+.container {
+    max-width: 950px;
+    margin: 35px auto;
+    padding: 15px;
+}
+
+.player-box {
+    background: #000;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid #34343c;
+}
+
+.player-screen {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    background: #000;
+    position: relative;
+}
+
+.player-screen iframe,
+.player-screen video {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    display: block;
+    background: #000;
+}
+
+.placeholder {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    color: #777;
+    font-size: 18px;
+    pointer-events: none;
+}
+
+.controls {
+    background: #191b23;
+    padding: 20px;
+    border-radius: 12px;
+    margin-top: 20px;
+}
+
+.controls h2 {
+    font-size: 18px;
+    margin-bottom: 15px;
+}
+
+input, select {
+    width: 100%;
+    padding: 13px;
+    border: 1px solid #393b46;
+    border-radius: 7px;
+    background: #101116;
+    color: white;
+    margin-bottom: 12px;
+    outline: none;
+}
+
+input:focus, select:focus {
+    border-color: #00d5ff;
+}
+
+button {
+    padding: 12px 18px;
+    border: none;
+    border-radius: 7px;
+    cursor: pointer;
+    font-weight: bold;
+    margin: 4px;
+}
+
+.load-btn {
+    background: #00d5ff;
+    color: #000;
+}
+
+.fullscreen-btn {
+    background: #333743;
+    color: white;
+}
+
+button:hover {
+    opacity: .85;
+}
+
+.status {
+    margin-top: 12px;
+    color: #aaa;
+    font-size: 13px;
+    overflow-wrap: anywhere;
+}
+
+footer {
+    text-align: center;
+    padding: 25px;
+    color: #777;
+    font-size: 13px;
+}
+
+@media(max-width:600px) {
+    .container {
+        margin: 15px auto;
+    }
+
+    header h1 {
+        font-size: 21px;
+    }
+
+    .controls {
+        padding: 15px;
+    }
+}
+</style>
+</head>
+
+<body>
+
+<header>
+    <h1>MY VIDEO PLAYER</h1>
+</header>
+
+<div class="container">
+
+    <div class="player-box" id="playerBox">
+        <div class="player-screen" id="playerScreen">
+
+            <div class="placeholder" id="placeholder">
+                Paste a video link below to start
+            </div>
+
+            <video id="videoPlayer"
+                   controls
+                   playsinline
+                   style="display:none">
+            </video>
+
+            <iframe id="iframePlayer"
+                    allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+                    allowfullscreen
+                    referrerpolicy="strict-origin-when-cross-origin"
+                    style="display:none">
+            </iframe>
+
+        </div>
+    </div>
+
+    <div class="controls">
+
+        <h2>Video Link Settings</h2>
+
+        <input
+            type="url"
+            id="videoURL"
+            placeholder="Paste your video URL here"
+        >
+
+        <select id="videoType">
+            <option value="auto">Auto Detect</option>
+            <option value="iframe">Embedded / iframe</option>
+            <option value="mp4">MP4 Video</option>
+            <option value="m3u8">M3U8 / HLS</option>
+            <option value="youtube">YouTube</option>
+        </select>
+
+        <button class="load-btn" onclick="loadVideo()">
+            ▶ LOAD VIDEO
+        </button>
+
+        <button class="fullscreen-btn" onclick="fullscreen()">
+            ⛶ FULL SCREEN
+        </button>
+
+        <div class="status" id="status">
+            Player ready.
+        </div>
+
+    </div>
+</div>
+
+<footer>
+    My Video Player © 2026
+</footer>
+
+<script>
+const video = document.getElementById("videoPlayer");
+const iframe = document.getElementById("iframePlayer");
+const placeholder = document.getElementById("placeholder");
+const statusText = document.getElementById("status");
+
+let hls = null;
+
+function resetPlayer() {
+    if (hls) {
+        hls.destroy();
+        hls = null;
+    }
+
+    video.pause();
+    video.removeAttribute("src");
+    video.load();
+
+    iframe.src = "about:blank";
+
+    video.style.display = "none";
+    iframe.style.display = "none";
+    placeholder.style.display = "flex";
+}
+
+function getYouTubeID(url) {
+    try {
+        const u = new URL(url);
+        if (u.hostname === "youtu.be") {
+            return u.pathname.split("/")[1];
+        }
+
+        if (u.hostname.endsWith("youtube.com")) {
+            if (u.pathname === "/watch") {
+                return u.searchParams.get("v");
+            }
+
+            if (["/embed/", "/shorts/", "/live/"].some(p =>
+                u.pathname.startsWith(p))) {
+                return u.pathname.split("/")[2];
+            }
+        }
+    } catch(e) {}
+
+    return null;
+}
+
+function loadVideo() {
+    const url = document.getElementById("videoURL").value.trim();
+    const type = document.getElementById("videoType").value;
+
+    if (!url) {
+        alert("Please enter a video URL!");
+        return;
+    }
+
+    let parsed;
+
+    try {
+        parsed = new URL(url);
+        if (!["https:", "http:"].includes(parsed.protocol)) {
+            throw new Error("Invalid protocol");
+        }
+    } catch(e) {
+        alert("Please enter a valid HTTP or HTTPS URL.");
+        return;
+    }
+
+    resetPlayer();
+    placeholder.style.display = "none";
+
+    let format = type;
+
+    if (format === "auto") {
+        if (getYouTubeID(url)) {
+            format = "youtube";
+        } else if (/\.m3u8($|[?#])/i.test(url)) {
+            format = "m3u8";
+        } else if (/\.mp4($|[?#])/i.test(url)) {
+            format = "mp4";
+        } else {
+            format = "iframe";
+        }
+    }
+
+    if (format === "youtube") {
+        const id = getYouTubeID(url);
+
+        if (!id) {
+            statusText.textContent = "Invalid YouTube URL.";
+            placeholder.style.display = "flex";
+            return;
+        }
+
+        iframe.src =
+            "https://www.youtube-nocookie.com/embed/" +
+            encodeURIComponent(id);
+
+        iframe.style.display = "block";
+        statusText.textContent = "YouTube video loaded.";
+        return;
+    }
+
+    if (format === "iframe") {
+        iframe.src = url;
+        iframe.style.display = "block";
+        statusText.textContent = "Embedded video loaded.";
+        return;
+    }
+
+    if (format === "mp4") {
+        video.style.display = "block";
+        video.src = url;
+        video.load();
+
+        statusText.textContent = "MP4 video loaded.";
+        video.play().catch(() => {});
+        return;
+    }
+
+    if (format === "m3u8") {
+        video.style.display = "block";
+
+        if (video.canPlayType("application/vnd.apple.mpegurl")) {
+            video.src = url;
+            video.play().catch(() => {});
+            statusText.textContent = "HLS video loaded.";
+        }
+        else if (window.Hls && Hls.isSupported()) {
+            hls = new Hls();
+
+            hls.loadSource(url);
+            hls.attachMedia(video);
+
+            hls.on(Hls.Events.MANIFEST_PARSED, function() {
+                video.play().catch(() => {});
+                statusText.textContent = "HLS video loaded.";
+            });
+
+            hls.on(Hls.Events.ERROR, function(event, data) {
+                if (data.fatal) {
+                    statusText.textContent =
+                        "Unable to play this HLS stream.";
+                }
+            });
+        }
+        else {
+            statusText.textContent =
+                "Your browser does not support this HLS stream.";
+        }
+    }
+}
+
+function fullscreen() {
+    const player = document.getElementById("playerBox");
+
+    if (player.requestFullscreen) {
+        player.requestFullscreen();
+    } else if (player.webkitRequestFullscreen) {
+        player.webkitRequestFullscreen();
+    }
+}
+
+video.addEventListener("error", function() {
+    statusText.textContent =
+        "Video could not be played. Check the URL or server settings.";
+});
+
+document.getElementById("videoURL").addEventListener("keydown", e => {
+    if (e.key === "Enter") loadVideo();
+});
+</script>
+
+</body>
+</html>
